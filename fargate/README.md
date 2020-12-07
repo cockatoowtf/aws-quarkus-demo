@@ -1,6 +1,6 @@
-# Quarkus example project for Amazon ECS with AWS Fargate
+# Quarkus example projects for Amazon ECS and Amazon EKS with AWS Fargate
 
-This example project demonstrates how Quarkus can be used to implement lightweight Java-based applications. 
+This example projects demonstrate how Quarkus can be used to implement lightweight Java-based applications. 
 In this documentation, we'll cover how to
 
 * Compile the application to a native executable
@@ -18,13 +18,6 @@ on AWS SDK for Java V2. The Quarkus extension supports two programming models:
 * Blocking access
 * Asynchronous programming
 
-[DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) is also supported: The downloadable version of DynamoDB lets you write and test applications without 
-accessing the DynamoDB web service. Instead, the database is self-contained on your computer. When you're ready to 
-deploy your application in production, you can make a few minor changes to the code so that it uses the DynamoDB web 
-service.
-
-Simply run `docker run -p 8000:8000 amazon/dynamodb-local` to execute DynamoDB locally.
-
 ## Compiling the application
 
 Compiling the application to an Uber-JAR is very straight forward:
@@ -39,9 +32,31 @@ To compile the application to a native image we have to add a few parameters:
 $ ./mvnw package -Pnative -Dquarkus.native.container-build=true -DskipTests
 ```
 
+## Local testing
+
+To test the application locally a Docker Compose file is provided. It sets up two containers, one with the compiled Uber-JAR
+and one with [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html):
+The local version of DynamoDB lets you write and test applications without accessing the DynamoDB web service.
+Instead, the database is self-contained on your computer.
+
+Simply run `docker-compose up` to build the application and run DynamoDB locally. The application will run on port `8080`.
+
+In order to create the necessary table in your DynamoDB locally run:
+
+```
+aws dynamodb create-table \
+    --table-name Users \
+    --attribute-definitions AttributeName=userId,AttributeType=S \
+    --key-schema AttributeName=userId,KeyType=HASH \
+    --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 \
+    --endpoint-url http://localhost:8000
+```
+
+For interacting with the application simply go to `http://localhost:8080/`. For further interactions see [Testing the application](#testing-the-application).
+
 ## Packaging the application as Docker image
 
-Now we have to build a Docker image containing the native image of our Java application. Under `src/main/docker` we have  two different Dockerfiles: `Dockerfile.jvm` and `Dockerfile.native`. The `Dockerfile.native`-file contains a few GraalVM-specific modifications to support TLS which is necessary for the AWS SDK for Java.
+Now we have to build a Docker image containing the native image of our Java application. Under `src/main/docker` we have  two different Dockerfiles: `Dockerfile.jvm` and `Dockerfile.native`. The `Dockerfile.native`-file contains a few [GraalVM](https://www.graalvm.org/)-specific modifications to support TLS which is necessary for the AWS SDK for Java.
 
 ```
 $ docker build -f src/main/docker/Dockerfile.native -t <repo/image:tag> .
@@ -53,18 +68,21 @@ $ docker push <repo/image:tag>
 After we've built and pushed the Docker image containing the native image of the application, we need to set up the basic infrastructure in `us-east-1`:
 
 ```
+| Amazon ECS | $cd ecs_cdk |
+|------------|-------------|
+| Amazon EKS | $cd eks_cdk |
+
 $ npm install -g aws-cdk
-$ cd ecs_cdk
 $ npm install
-$ npm run build
 $ cdk deploy  // Deploys the CloudFormation template
 ```
 
 ## Testing the application
 
-After the infrastructure has been created successfully, the outputs of the CloudFormation stack is the load balancer URL. You can test the application using the following statements:
+After the infrastructure has been created successfully, the output `LoadBalancerDNS` of the CloudFormation stack is the load balancer URL. You can test the application using the following statements:
 
 ```
+$ curl -v http://<lb-url>:8080/health // from HealthResource.java Resource
 $ curl -v -d '{"userName":"hmueller", "firstName":"Hans", "lastName":"Mueller", "age":"35"}' -H "Content-Type: application/json" -X POST http://<lb-url>:8080/users
 $ curl -v http://<lb-url>:8080/users/<user-id>
 $ curl -v http://<lb-url>:8080/users
